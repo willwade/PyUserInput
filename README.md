@@ -47,7 +47,7 @@ PyKeyboard allows for a range of ways for sending keystrokes:
     k.release_key('H')
     # or you can 'tap' a key which does both
     k.tap_key('e')
-    # note that that tap_key does support a way of repeating keystrokes with a interval time between each
+    # note that tap_key does support a way of repeating keystrokes with a interval time between each
     k.tap_key('l',n=2,interval=5) 
     # and you can send a string if needed too
     k.type_string('o World!')
@@ -77,6 +77,11 @@ Consistency between platforms is a big challenge; Please look at the source for 
     k.tap_key(k.alt_key)
     # Mac
     k.tap_key('Alternate')
+    
+    # To view all the keys available in windows:
+    k.numpad_keys.viewkeys()
+    k.function_keys
+    # And on the mac - see the two (non-callable) lookup lists character_translate_table and special_key_translate_table
 
 I'd like to make a special note about using PyMouseEvent and PyKeyboardEvent.
 These objects are a framework for listening for mouse and keyboard input; they
