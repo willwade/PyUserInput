@@ -81,7 +81,8 @@ Consistency between platforms is a big challenge; Please look at the source for 
     # To view all the keys available in windows:
     k.numpad_keys.viewkeys()
     k.function_keys
-    # And on the mac - see the two (non-callable) lookup lists character_translate_table and special_key_translate_table
+    # And on the mac - see the two (non-callable)
+    #  lookup lists character_translate_table and special_key_translate_table
 
 I'd like to make a special note about using PyMouseEvent and PyKeyboardEvent.
 These objects are a framework for listening for mouse and keyboard input; they
