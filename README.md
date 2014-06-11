@@ -69,8 +69,9 @@ Note you can also send multiple keystrokes together (e.g. when accessing a keybo
     # Mac example
     k.press_keys(['Command','shift','3'])
     # Windows example
-    k.press_keys([k.windows_l_key,'d'])
-
+    combo = ['Control', 'Alt', 'Delete']
+    keyboard.press_keys(*combo)
+    
 Consistency between platforms is a big challenge; Please look at the source for the operating system that you are using to help understand the format of the keys that you would need to send. For example:
 
     # Windows
