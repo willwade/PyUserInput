@@ -69,6 +69,14 @@ class PyKeyboard(PyKeyboardMeta):
             char_vk = win32api.VkKeyScan(character)
             win32api.keybd_event(char_vk, 0, KEYEVENTF_KEYUP, 0)
 
+    def lookup_character_value(self, keycode):
+        """ Helper method to lookup a character value from a keycode """
+        raise NotImplementedError
+    
+    def lookup_keycode_value(self, character):
+        """ Helper method to lookup a keycode from a character """
+        return win32api.VkKeyScan(character)
+   
     def special_key_assignment(self):
         """
         Special Key assignment for windows

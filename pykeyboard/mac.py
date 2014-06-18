@@ -1,78 +1,33 @@
-#Copyright 2013 Paul Barton
-#
-#This program is free software: you can redistribute it and/or modify
-#it under the terms of the GNU General Public License as published by
-#the Free Software Foundation, either version 3 of the License, or
-#(at your option) any later version.
-#
-#This program is distributed in the hope that it will be useful,
-#but WITHOUT ANY WARRANTY; without even the implied warranty of
-#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#GNU General Public License for more details.
-#
-#You should have received a copy of the GNU General Public License
-#along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 import time
 from Quartz import *
 from AppKit import NSEvent
 from .base import PyKeyboardMeta, PyKeyboardEventMeta
+# The following makes this more keyboard layout independent
+import mac_keycode
 
 # Taken from events.h
 # /System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/Headers/Events.h
-character_translate_table = {
-    'a': 0x00,
-    's': 0x01,
-    'd': 0x02,
-    'f': 0x03,
-    'h': 0x04,
-    'g': 0x05,
-    'z': 0x06,
-    'x': 0x07,
-    'c': 0x08,
-    'v': 0x09,
-    'b': 0x0b,
-    'q': 0x0c,
-    'w': 0x0d,
-    'e': 0x0e,
-    'r': 0x0f,
-    'y': 0x10,
-    't': 0x11,
-    '1': 0x12,
-    '2': 0x13,
-    '3': 0x14,
-    '4': 0x15,
-    '6': 0x16,
-    '5': 0x17,
-    '=': 0x18,
-    '9': 0x19,
-    '7': 0x1a,
+
+key_aliases = {
+    '=': 0x18, # NB: These are variable and shouldn't really be here.. 
     '-': 0x1b,
-    '8': 0x1c,
-    '0': 0x1d,
     ']': 0x1e,
-    'o': 0x1f,
-    'u': 0x20,
     '[': 0x21,
-    'i': 0x22,
-    'p': 0x23,
-    'l': 0x25,
-    'j': 0x26,
     '\'': 0x27,
-    'k': 0x28,
     ';': 0x29,
     '\\': 0x2a,
     ',': 0x2b,
     '/': 0x2c,
-    'n': 0x2d,
-    'm': 0x2e,
     '.': 0x2f,
     '`': 0x32,
     ' ': 0x31,
     '\r': 0x24,
     '\t': 0x30,
     '\n': 0x24,
-    'return' : 0x24,
+    'return' : 0x24, # the following are fixed keys # http://stackoverflow.com/a/16125341/1123094
     'tab' : 0x30,
     'space' : 0x31,
     'delete' : 0x33,
@@ -87,8 +42,37 @@ character_translate_table = {
     'rightoption' : 0x3D,
     'rightcontrol' : 0x3E,
     'function' : 0x3F,
+    'home': 0x73,
+    'multiply':0x43,
+    'add':0x45,
+    'subtract':0x4e,
+    'divide':0x4b,
+    'pagedown': 0x79,
+    'forwarddelete': 0x75,
+    'pagedown' : 0x79,
+    'help' : 0x72,
+    'home' : 0x73,
+    'pageup' : 0x74,
+    'forwarddelete' : 0x75,
+    'F18' : 0x4F,
+    'F19' : 0x50,
+    'F20' : 0x5A,
+    'F5' : 0x60,
+    'F6' : 0x61,
+    'F7' : 0x62,
+    'F3' : 0x63,
+    'F8' : 0x64,
+    'F9' : 0x65,
+    'F11' : 0x67,
+    'F13' : 0x69,
+    'F16' : 0x6A,
+    'F14' : 0x6B,
+    'F10' : 0x6D,
+    'F12' : 0x6F,
+    'F15' : 0x71,
+    'function' : 0x3F,
+    'F17' : 0x40
 }
-
 
 # Taken from ev_keymap.h
 # http://www.opensource.apple.com/source/IOHIDFamily/IOHIDFamily-86.1/IOHIDSystem/IOKit/hidsystem/ev_keymap.h
@@ -125,10 +109,11 @@ class PyKeyboard(PyKeyboardMeta):
       self.shift_key = 'shift'
       self.modifier_table = {'Shift':False,'Command':False,'Control':False,'Alternate':False}
         
+
     def press_key(self, key):
         if key.title() in self.modifier_table: 
             self.modifier_table.update({key.title():True})
-                    
+            
         if key in special_key_translate_table:
             self._press_special_key(key, True)
         else:
@@ -155,15 +140,24 @@ class PyKeyboard(PyKeyboardMeta):
 
     def _press_normal_key(self, key, down):
         try:
-            key_code = character_translate_table[key.lower()]
-            # kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskControl | kCGEventFlagMaskShift
+            # VK_ is a raw keycode
+            if key[0:3]=='VK_':
+                key_code = int(key[3:])
+            else:
+                key_code = self.lookup_keycode_value(key.lower())
+                if key_code == None:
+                    raise RuntimeError("Key {} not implemented.".format(key))
+            # certain flags are required for Mac for modifier keys. These are: 
+            # kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand |
+            #   kCGEventFlagMaskControl | kCGEventFlagMaskShift
             event = CGEventCreateKeyboardEvent(None, key_code, down)
             mkeyStr = ''
             for mkey in self.modifier_table:
                 if self.modifier_table[mkey]:
                     if len(mkeyStr)>1: mkeyStr = mkeyStr+' ^ '
                     mkeyStr = mkeyStr+'kCGEventFlagMask'+mkey                    
-            if len(mkeyStr)>1: eval('CGEventSetFlags(event, '+mkeyStr+')')
+            if len(mkeyStr)>1:
+                eval('CGEventSetFlags(event, '+mkeyStr+')')
             CGEventPost(kCGHIDEventTap, event)
             if key.lower() == "shift":
               time.sleep(.1)
@@ -191,7 +185,20 @@ class PyKeyboard(PyKeyboardMeta):
             )
 
         CGEventPost(0, ev.CGEvent())
+    
 
+    def lookup_character_value(self, keycode):
+        """ Helper method to lookup a character value from a keycode """
+        return mac_keycode.createStringForKey(keycode)
+    
+    def lookup_keycode_value(self, character):
+        """ Helper method to lookup a keycode from a character """
+        if character.lower() in key_aliases:
+            key_code = key_aliases[character.lower()]
+        else:
+            key_code = mac_keycode.keyCodeForChar(character)
+        return key_code
+    
 class PyKeyboardEvent(PyKeyboardEventMeta):
     def run(self):
         tap = CGEventTapCreate(
