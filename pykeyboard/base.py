@@ -42,12 +42,12 @@ class PyKeyboardMeta(object):
             self.release_key(character)
             time.sleep(interval)
 
-    def press_keys(self,*keys):
-        """Press a number of keys at once."""
-        for key in keys:
-            self.press_key(key)
-        for key in keys:
-            self.release_key(key)
+    def press_keys(self,characters=[]):
+        """Press a given character key."""
+        for character in characters:
+            self.press_key(character)
+        for character in characters:
+            self.release_key(character)
     
     def type_string(self, char_string, interval=0):
         """
