@@ -21,7 +21,6 @@ framework to be extended by each platform.
 import time
 from threading import Thread
 
-
 class PyKeyboardMeta(object):
     """
     The base class for PyKeyboard. Represents basic operational model.
@@ -97,7 +96,6 @@ class PyKeyboardMeta(object):
         if character in '<>?:"{}|~!@#$%^&*()_+':
             return True
         return False
-
 
 class PyKeyboardEventMeta(Thread):
     """

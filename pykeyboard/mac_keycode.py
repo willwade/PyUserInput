@@ -1,5 +1,6 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
+# PyKeycode : https://github.com/abarnert/pykeycode
+# With thanks to abarnet 
 # http://stackoverflow.com/questions/1918841/how-to-convert-ascii-character-to-cgkeycode */
 
 import ctypes
@@ -7,10 +8,6 @@ import ctypes.util
 import CoreFoundation
 import Foundation
 import objc
-# The following (and the shifted form) are the variable keys
-# This is a UK layout and hence somewhat pointless
-#char_index = "asdfhgzxcv§bqweryt123465=97-80]ou[iplj'k;\,/nm."
-#shifted_index = 'ASDFHGZXCV±BQERYT!@£$^%+(&_*)OU{IPLJ"K:|<?NM>'
 
 try:
     unichr
@@ -62,7 +59,7 @@ kUCKeyTranslateNoDeadKeysBit = 0
 kTISPropertyUnicodeKeyLayoutData = ctypes.c_void_p.in_dll(
     carbon, 'kTISPropertyUnicodeKeyLayoutData')
 
-def createStringForKey(keycode):
+def createStringForKey(keycode, modifiers=0):
     keyboard_p = carbon.TISCopyCurrentKeyboardInputSource()
     keyboard = objcify(keyboard_p)
     layout_p = carbon.TISGetInputSourceProperty(keyboard_p, 
@@ -75,7 +72,7 @@ def createStringForKey(keycode):
     retval = carbon.UCKeyTranslate(layoutbytes.tobytes(),
                                    keycode,
                                    kUCKeyActionDisplay,
-                                   0,
+                                   modifiers,
                                    carbon.LMGetKbdType(),
                                    kUCKeyTranslateNoDeadKeysBit,
                                    ctypes.byref(keysdown),
@@ -83,27 +80,91 @@ def createStringForKey(keycode):
                                    ctypes.byref(length),
                                    chars)
     s = u''.join(unichr(chars[i]) for i in range(length.value))
-    #CoreFoundation.CFRelease(keyboard)
+    CoreFoundation.CFRelease(keyboard)
     return s
 
-codedict = {createStringForKey(code): code for code in range(128)}
-# Now create shifted codedict..
+codedict = {createStringForKey(code, modifiers): (code, modifiers)
+            for code in range(128) for modifiers in (10, 8, 2, 0)}
+
+# Aliases
+aliases = {
+    u'space': u' ',
+    u'tab': u'\t',
+    # ...
+}
+for alias, c in aliases.items():
+    codedict[alias] = codedict[c]
+
+# The following is fixed
+specials = {
+    u'return' : (0x24, 0),
+    u'delete' : (0x33, 0),
+    u'escape' : (0x35, 0),
+    u'command' : (0x37, 0),
+    u'shift' : (0x38, 0),
+    u'capslock' : (0x39, 0),
+    u'option' : (0x3A, 0),
+    u'alternate' : (0x3A, 0),
+    u'control' : (0x3B, 0),
+    u'rightshift' : (0x3C, 0),
+    u'rightoption' : (0x3D, 0),
+    u'rightcontrol' : (0x3E, 0),
+    u'function' : (0x3F, 0),
+    u'home': (0x73, 0),
+    u'pagedown': (0x79, 0),
+    u'forwarddelete': (0x75, 0),
+    u'pagedown' : (0x79, 0),
+    u'help' : (0x72, 0),
+    u'home' : (0x73, 0),
+    u'pageup' : (0x74, 0),
+    u'forwarddelete' : (0x75, 0),
+    u'F18' : (0x4F, 0),
+    u'F19' : (0x50, 0),
+    u'F20' : (0x5A, 0),
+    u'F5' : (0x60, 0),
+    u'F6' : (0x61, 0),
+    u'F7' : (0x62, 0),
+    u'F3' : (0x63, 0),
+    u'F8' : (0x64, 0),
+    u'F9' : (0x65, 0),
+    u'F11' : (0x67, 0),
+    u'F13' : (0x69, 0),
+    u'F16' : (0x6A, 0),
+    u'F14' : (0x6B, 0),
+    u'F10' : (0x6D, 0),
+    u'F12' : (0x6F, 0),
+    u'F15' : (0x71, 0),
+    u'function' : (0x3F, 0),
+    u'F17' : (0x40, 0)
+}
+codedict.update(specials)
+
 
 def keyCodeForChar(c):
-    try:
-        return codedict[c]
-    except KeyError:
-        return None
+    return codedict[c]
+    
+def printcode(keycode):
+    print(u"{}: {!r} Shift{!r} Option{!r} Command{!r}".format(
+        keycode,
+        createStringForKey(keycode, 0),
+        createStringForKey(keycode, 2),
+        createStringForKey(keycode, 8),
+        createStringForKey(keycode, 10)))
 
 if __name__ == '__main__':
     import sys
     for arg in sys.argv[1:]:
         try:
+            arg = arg.decode(sys.stdin.encoding)
+        except AttributeError:
+            pass
+        try:
             keycode = int(arg)
         except ValueError:
-            print(u'{}: {}'.format(arg, keyCodeForChar(arg)))
+            print(u"{!r} ('{}'): keycode {}, mod {}".format(
+                arg, arg, *keyCodeForChar(arg)))
         else:
-            print('{}: {!r}'.format(keycode, createStringForKey(keycode)))
+            printcode(keycode)
     if len(sys.argv) < 2:
         for keycode in range(128):
-            n
+            printcode(keycode)

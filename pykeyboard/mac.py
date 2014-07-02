@@ -1,78 +1,24 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
+#Copyright 2013 Paul Barton
+#
+#This program is free software: you can redistribute it and/or modify
+#it under the terms of the GNU General Public License as published by
+#the Free Software Foundation, either version 3 of the License, or
+#(at your option) any later version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import time
-from Quartz import *
+import Quartz
 from AppKit import NSEvent
 from .base import PyKeyboardMeta, PyKeyboardEventMeta
-# The following makes this more keyboard layout independent
+# Needs to be merged at some point...
 import mac_keycode
-
-# Taken from events.h
-# /System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/Headers/Events.h
-
-key_aliases = {
-    '=': 0x18, # NB: These are variable and shouldn't really be here.. 
-    '-': 0x1b,
-    ']': 0x1e,
-    '[': 0x21,
-    '\'': 0x27,
-    ';': 0x29,
-    '\\': 0x2a,
-    ',': 0x2b,
-    '/': 0x2c,
-    '.': 0x2f,
-    '`': 0x32,
-    ' ': 0x31,
-    '\r': 0x24,
-    '\t': 0x30,
-    '\n': 0x24,
-    'return' : 0x24, # the following are fixed keys # http://stackoverflow.com/a/16125341/1123094
-    'tab' : 0x30,
-    'space' : 0x31,
-    'delete' : 0x33,
-    'escape' : 0x35,
-    'command' : 0x37,
-    'shift' : 0x38,
-    'capslock' : 0x39,
-    'option' : 0x3A,
-    'alternate' : 0x3A,
-    'control' : 0x3B,
-    'rightshift' : 0x3C,
-    'rightoption' : 0x3D,
-    'rightcontrol' : 0x3E,
-    'function' : 0x3F,
-    'home': 0x73,
-    'multiply':0x43,
-    'add':0x45,
-    'subtract':0x4e,
-    'divide':0x4b,
-    'pagedown': 0x79,
-    'forwarddelete': 0x75,
-    'pagedown' : 0x79,
-    'help' : 0x72,
-    'home' : 0x73,
-    'pageup' : 0x74,
-    'forwarddelete' : 0x75,
-    'F18' : 0x4F,
-    'F19' : 0x50,
-    'F20' : 0x5A,
-    'F5' : 0x60,
-    'F6' : 0x61,
-    'F7' : 0x62,
-    'F3' : 0x63,
-    'F8' : 0x64,
-    'F9' : 0x65,
-    'F11' : 0x67,
-    'F13' : 0x69,
-    'F16' : 0x6A,
-    'F14' : 0x6B,
-    'F10' : 0x6D,
-    'F12' : 0x6F,
-    'F15' : 0x71,
-    'function' : 0x3F,
-    'F17' : 0x40
-}
 
 # Taken from ev_keymap.h
 # http://www.opensource.apple.com/source/IOHIDFamily/IOHIDFamily-86.1/IOHIDSystem/IOKit/hidsystem/ev_keymap.h
@@ -109,15 +55,15 @@ class PyKeyboard(PyKeyboardMeta):
       self.shift_key = 'shift'
       self.modifier_table = {'Shift':False,'Command':False,'Control':False,'Alternate':False}
         
-
     def press_key(self, key):
-        if key.title() in self.modifier_table: 
-            self.modifier_table.update({key.title():True})
-            
+        # Press the modifier
+        if key.title() in self.modifier_table: self.modifier_table.update({key.title():True})
+        # NB: we also need to actually press the modifier so this gets passed to normal_key
         if key in special_key_translate_table:
             self._press_special_key(key, True)
         else:
             self._press_normal_key(key, True)
+
 
     def release_key(self, key):
         # remove the key
@@ -128,6 +74,11 @@ class PyKeyboard(PyKeyboardMeta):
         else:
             self._press_normal_key(key, False)
 
+    def type_string(self,char_string, interval=0):
+        for ch in char_string:
+            self.tap_key(ch)
+            time.sleep(interval)
+        
     def special_key_assignment(self):
         self.volume_mute_key = 'KEYTYPE_MUTE'
         self.volume_down_key = 'KEYTYPE_SOUND_DOWN'
@@ -140,26 +91,30 @@ class PyKeyboard(PyKeyboardMeta):
 
     def _press_normal_key(self, key, down):
         try:
-            # VK_ is a raw keycode
+            # modifier is 0 ; or no-modifier by default
+            modifier = 0
+            # VK_ is a raw keycode. 
             if key[0:3]=='VK_':
                 key_code = int(key[3:])
             else:
-                key_code = self.lookup_keycode_value(key.lower())
+                # NB: this could then provide a different modifier
+                key_code, modifier = self.lookup_keycode_value(key)
+                # Update this.. # hmm. how does this get set back again after a key press
+                self.update_modifier_table(modifier)
                 if key_code == None:
                     raise RuntimeError("Key {} not implemented.".format(key))
-            # certain flags are required for Mac for modifier keys. These are: 
-            # kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand |
-            #   kCGEventFlagMaskControl | kCGEventFlagMaskShift
-            event = CGEventCreateKeyboardEvent(None, key_code, down)
+            # For sticky keys
+            event = Quartz.CGEventCreateKeyboardEvent(None, key_code, down)
             mkeyStr = ''
             for mkey in self.modifier_table:
                 if self.modifier_table[mkey]:
                     if len(mkeyStr)>1: mkeyStr = mkeyStr+' ^ '
-                    mkeyStr = mkeyStr+'kCGEventFlagMask'+mkey                    
+                    mkeyStr = mkeyStr+'Quartz.kCGEventFlagMask'+mkey   
             if len(mkeyStr)>1:
-                eval('CGEventSetFlags(event, '+mkeyStr+')')
-            CGEventPost(kCGHIDEventTap, event)
-            if key.lower() == "shift":
+                eval('Quartz.CGEventSetFlags(event, '+mkeyStr+')')
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+            # I don't get this line: 
+            if key.title() in self.modifier_table:
               time.sleep(.1)
 
         except KeyError:
@@ -184,48 +139,62 @@ class PyKeyboard(PyKeyboardMeta):
                 -1 # data2
             )
 
-        CGEventPost(0, ev.CGEvent())
-    
+        Quartz.CGEventPost(0, ev.Quartz.CGEvent())
 
-    def lookup_character_value(self, keycode):
+    def update_modifier_table(self,n):
+        """ Pass a modifier Bit and it will return which keys are set """
+        modar =  [n & (2**i) > 0 for i in range(4)]
+        if modar[0]:
+            self.modifier_table['Control'] = True
+        if modar[1]:
+            self.modifier_table['Shift'] = True
+        if modar[2]:
+            self.modifier_table['Alternate'] = True
+        if modar[3]:
+            self.modifier_table['Command'] = True
+        return True        
+        
+    def lookup_character_value(self, keycode, modifier=0):
         """ Helper method to lookup a character value from a keycode """
-        return mac_keycode.createStringForKey(keycode)
+        return mac_keycode.createStringForKey(keycode,m)
     
     def lookup_keycode_value(self, character):
         """ Helper method to lookup a keycode from a character """
-        if character.lower() in key_aliases:
-            key_code = key_aliases[character.lower()]
-        else:
-            key_code = mac_keycode.keyCodeForChar(character)
-        return key_code
+        key_code, modifier = mac_keycode.keyCodeForChar(character)
+        return key_code, modifier
     
+    def is_char_shifted(self, character):
+        """ Returns True if the key character is uppercase or shifted."""
+        key_code, modifier = mac_keycode.keyCodeForChar(character)
+        return True if modifier == 2 else False
+
 class PyKeyboardEvent(PyKeyboardEventMeta):
     def run(self):
-        tap = CGEventTapCreate(
-            kCGSessionEventTap,
-            kCGHeadInsertEventTap,
-            kCGEventTapOptionDefault,
-            CGEventMaskBit(kCGEventKeyDown) |
-            CGEventMaskBit(kCGEventKeyUp),
+        tap = Quartz.CGEventTapCreate(
+            Quartz.kCGSessionEventTap,
+            Quartz.kCGHeadInsertEventTap,
+            Quartz.kCGEventTapOptionDefault,
+            Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown) |
+            Quartz.CGEventMaskBit(Quartz.kCGEventKeyUp),
             self.handler,
             None)
 
-        loopsource = CFMachPortCreateRunLoopSource(None, tap, 0)
-        loop = CFRunLoopGetCurrent()
-        CFRunLoopAddSource(loop, loopsource, kCFRunLoopDefaultMode)
-        CGEventTapEnable(tap, True)
+        loopsource = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+        loop = Quartz.CFRunLoopGetCurrent()
+        Quartz.CFRunLoopAddSource(loop, loopsource, Quartz.kCFRunLoopDefaultMode)
+        Quartz.CGEventTapEnable(tap, True)
 
         while self.state:
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 5, False)
+            Quartz.CFRunLoopRunInMode(Quartz.kCFRunLoopDefaultMode, 5, False)
 
     def handler(self, proxy, type, event, refcon):
-        key = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
-        if type == kCGEventKeyDown:
+        key = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
+        if type == Quartz.kCGEventKeyDown:
             self.key_press(key)
-        elif type == kCGEventKeyUp:
+        elif type == Quartz.kCGEventKeyUp:
             self.key_release(key)
 
         if self.capture:
-            CGEventSetType(event, kCGEventNull)
+            Quartz.CGEventSetType(event, Quartz.kCGEventNull)
 
         return event
