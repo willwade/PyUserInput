@@ -67,7 +67,7 @@ and it supports a wide range of special keys:
 Note you can also send multiple keystrokes together (e.g. when accessing a keyboard shortcut) using the press_keys method:
 
     # Mac example
-    k.press_keys(['Command','shift','3'])
+    k.press_keys(['command','shift','3'])
     # Windows example
     combo = ['Control', 'Alt', 'Delete']
     keyboard.press_keys(*combo)

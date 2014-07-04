@@ -1,13 +1,11 @@
+# -*- coding: utf-8 -*-
 #!/usr/bin/env python
-# PyKeycode : https://github.com/abarnert/pykeycode
-# With thanks to abarnet 
 # http://stackoverflow.com/questions/1918841/how-to-convert-ascii-character-to-cgkeycode */
 
 import ctypes
 import ctypes.util
-import CoreFoundation
-import Foundation
-import objc
+import struct
+import unicodedata
 
 try:
     unichr
@@ -16,21 +14,11 @@ except NameError:
 
 carbon_path = ctypes.util.find_library('Carbon')
 carbon = ctypes.cdll.LoadLibrary(carbon_path)
-    
-# We could rely on the fact that kTISPropertyUnicodeKeyLayoutData has
-# been the string @"TISPropertyUnicodeKeyLayoutData" since even the
-# Classic Mac days. Or we could load it from the framework. 
-# Unfortunately, the framework doesn't have PyObjC wrappers, and there's
-# no easy way to force PyObjC to wrap a CF/ObjC object that it doesn't
-# know about. So:
-_objc = ctypes.PyDLL(objc._objc.__file__)
-_objc.PyObjCObject_New.restype = ctypes.py_object
-_objc.PyObjCObject_New.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-def objcify(ptr):
-    return _objc.PyObjCObject_New(ptr, 0, 1)
-kTISPropertyUnicodeKeyLayoutData_p = ctypes.c_void_p.in_dll(
-    carbon, 'kTISPropertyUnicodeKeyLayoutData')
-kTISPropertyUnicodeKeyLayoutData = objcify(kTISPropertyUnicodeKeyLayoutData_p)
+
+CFIndex = ctypes.c_int64
+class CFRange(ctypes.Structure):
+    _fields_ = [('loc', CFIndex),
+                ('len', CFIndex)]
 
 carbon.TISCopyCurrentKeyboardInputSource.argtypes = []
 carbon.TISCopyCurrentKeyboardInputSource.restype = ctypes.c_void_p
@@ -38,118 +26,223 @@ carbon.TISGetInputSourceProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 carbon.TISGetInputSourceProperty.restype = ctypes.c_void_p
 carbon.LMGetKbdType.argtypes = []
 carbon.LMGetKbdType.restype = ctypes.c_uint32
-OptionBits = ctypes.c_uint32
-UniCharCount = ctypes.c_uint8
-UniChar = ctypes.c_uint16
-UniChar4 = UniChar * 4
-carbon.UCKeyTranslate.argtypes = [ctypes.c_void_p, # keyLayoutPtr
-                                  ctypes.c_uint16, # virtualKeyCode
-                                  ctypes.c_uint16, # keyAction
-                                  ctypes.c_uint32, # modifierKeyState
-                                  ctypes.c_uint32, # keyboardType
-                                  OptionBits,      # keyTranslateOptions
-                                  ctypes.POINTER(ctypes.c_uint32), # deadKeyState
-                                  UniCharCount,    # maxStringLength
-                                  ctypes.POINTER(UniCharCount), # actualStringLength
-                                  UniChar4]
-carbon.UCKeyTranslate.restype = ctypes.c_uint32 # OSStatus
-kUCKeyActionDisplay = 3
-kUCKeyTranslateNoDeadKeysBit = 0
+carbon.CFDataGetLength.argtypes = [ctypes.c_void_p]
+carbon.CFDataGetLength.restype = ctypes.c_uint64
+carbon.CFDataGetBytes.argtypes = [ctypes.c_void_p, CFRange, ctypes.c_void_p]
+carbon.CFDataGetBytes.restype = None
+carbon.CFRelease.argtypes = [ctypes.c_void_p]
+carbon.CFRelease.restype = None
 
 kTISPropertyUnicodeKeyLayoutData = ctypes.c_void_p.in_dll(
     carbon, 'kTISPropertyUnicodeKeyLayoutData')
 
-def createStringForKey(keycode, modifiers=0):
+def parselayout(buf, ktype):
+    hf, dv, featureinfo, ktcount = struct.unpack_from('HHII', buf)
+    offset = struct.calcsize('HHII')
+    ktsize = struct.calcsize('IIIIIII')
+    kts = [struct.unpack_from('IIIIIII', buf, offset+ktsize*i)
+           for i in range(ktcount)]
+    for i, kt in enumerate(kts):
+        if kt[0] <= ktype <= kt[1]:
+            kentry = i
+            break
+    else:
+        kentry = 0
+    ktf, ktl, modoff, charoff, sroff, stoff, seqoff = kts[kentry]
+    #for i, kt in enumerate(kts):
+    #    print('{:3}-{:3}{} mods {} char {} records {} term {} seq {}'.format(
+    #        kt[0], kt[1], 
+    #        '*' if i == kentry else ' ',
+    #        kt[2], kt[3], kt[4], kt[5], kt[6]))
+
+    # Modifiers
+    mf, deftable, mcount = struct.unpack_from('HHI', buf, modoff)
+    modtableoff = modoff + struct.calcsize('HHI')
+    modtables = struct.unpack_from('B'*mcount, buf, modtableoff)
+    modmapping = {}
+    for i, table in enumerate(modtables):
+        modmapping.setdefault(table, i)
+    #print(modmapping)
+
+    # Sequences
+    if not seqoff:
+        sequences = []
+    else:
+        sf, scount = struct.unpack_from('HH', buf, seqoff)
+        seqtableoff = seqoff + struct.calcsize('HH')
+        lastsoff = -1
+        for soff in struct.unpack_from('H'*scount, buf, seqtableoff):
+            if lastsoff >= 0:
+                sequences.append(buf[seqoff+lastoff:seqoff+soff].decode('utf-16'))
+            lastsoff = soff
+    def lookupseq(key):
+        if key >= 0xFFFE:
+            return None
+        if key & 0xC000:
+            seq = key & ~0xC000
+            if seq < len(sequences):
+                return sequences[seq]
+        return unichr(key)
+
+    # Dead keys
+    deadkeys = []
+    if sroff:
+        srf, srcount = struct.unpack_from('HH', buf, sroff)
+        srtableoff = sroff + struct.calcsize('HH')
+        for recoff in struct.unpack_from('I'*srcount, buf, srtableoff):
+            cdata, nextstate, ecount, eformat = struct.unpack_from('HHHH', buf, recoff)
+            recdataoff = recoff + struct.calcsize('HHHH')
+            edata = buf[recdataoff:recdataoff+4*ecount]
+            deadkeys.append((cdata, nextstate, ecount, eformat, edata))
+    #for dk in deadkeys:
+    #    print(dk)
+    if stoff:
+        stf, stcount = struct.unpack_from('HH', buf, stoff)
+        sttableoff = stoff + struct.calcsize('HH')
+        dkterms = struct.unpack_from('H'*stcount, buf, sttableoff)
+    else:
+        dkterms = []
+    #print(dkterms)
+
+    def lookup_and_add(key, j, mod):
+        ch = lookupseq(key)
+        if ch is not None:
+            mapping.setdefault(ch, (j, mod))
+            revmapping[j, mod] = ch
+        elif key == 0xFFFF:
+            revmapping[j, mod] = u''
+        else:
+            revmapping[j, mod] = u'<{}>'.format(key)
+    
+    # Get char tables
+    cf, csize, ccount = struct.unpack_from('HHI', buf, charoff)
+    chartableoff = charoff + struct.calcsize('HHI')
+    mapping = {}
+    revmapping = {}
+    deadstatemapping = {}
+    deadrevmapping = {}
+    for i, tableoff in enumerate(struct.unpack_from('I'*ccount, buf, chartableoff)):
+        mod = modmapping[i]
+        for j, key in enumerate(struct.unpack_from('H'*csize, buf, tableoff)):
+            ch = None
+            if key >= 0xFFFE:
+                revmapping[j, mod] = u'<{}>'.format(key)
+            elif key & 0x0C000 == 0x4000:
+                dead = key & ~0xC000
+                if dead < len(deadkeys):
+                    cdata, nextstate, ecount, eformat, edata = deadkeys[dead]
+                    if eformat == 0 and nextstate: # initial
+                        deadstatemapping[nextstate] = (j, mod)
+                        if nextstate-1 < len(dkterms):
+                            basekey = lookupseq(dkterms[nextstate-1])
+                            revmapping[j, mod] = u'<deadkey #{}: {}>'.format(nextstate, basekey)
+                        else:
+                            revmapping[j, mod] = u'<deadkey #{}>'.format(nextstate)
+                    elif eformat == 1: # terminal
+                        deadrevmapping[j, mod] = deadkeys[dead]
+                        lookup_and_add(cdata, j, mod)
+                    elif eformat == 2: # range
+                        # TODO!
+                        pass
+            else:
+                lookup_and_add(key, j, mod)
+                
+    for key, dead in deadrevmapping.items():
+        j, mod = key
+        cdata, nextstate, ecount, eformat, edata = dead
+        entries = [struct.unpack_from('HH', edata, i*4) for i in range(ecount)]
+        for state, key in entries:
+            dj, dmod = deadstatemapping[state]
+            ch = lookupseq(key)
+            mapping.setdefault(ch, ((dj, dmod), (j, mod)))
+            revmapping[(dj, dmod), (j, mod)] = ch
+
+    return mapping, revmapping, modmapping
+
+def getlayout():
     keyboard_p = carbon.TISCopyCurrentKeyboardInputSource()
-    keyboard = objcify(keyboard_p)
     layout_p = carbon.TISGetInputSourceProperty(keyboard_p, 
                                                 kTISPropertyUnicodeKeyLayoutData)
-    layout = objcify(layout_p)
-    layoutbytes = layout.bytes()
-    keysdown = ctypes.c_uint32()
-    length = UniCharCount()
-    chars = UniChar4()
-    retval = carbon.UCKeyTranslate(layoutbytes.tobytes(),
-                                   keycode,
-                                   kUCKeyActionDisplay,
-                                   modifiers,
-                                   carbon.LMGetKbdType(),
-                                   kUCKeyTranslateNoDeadKeysBit,
-                                   ctypes.byref(keysdown),
-                                   4,
-                                   ctypes.byref(length),
-                                   chars)
-    s = u''.join(unichr(chars[i]) for i in range(length.value))
-    CoreFoundation.CFRelease(keyboard)
-    return s
+    layout_size = carbon.CFDataGetLength(layout_p)
+    layout_buf = ctypes.create_string_buffer(b'\000'*layout_size)
+    carbon.CFDataGetBytes(layout_p, CFRange(0, layout_size), ctypes.byref(layout_buf))
+    ktype = carbon.LMGetKbdType()
+    ret = parselayout(layout_buf, ktype)
+    carbon.CFRelease(keyboard_p)
+    return ret
 
-codedict = {createStringForKey(code, modifiers): (code, modifiers)
-            for code in range(128) for modifiers in (10, 8, 2, 0)}
+mapping, revmapping, modmapping = getlayout()
 
-# Aliases
-aliases = {
-    u'space': u' ',
-    u'tab': u'\t',
-    # ...
-}
-for alias, c in aliases.items():
-    codedict[alias] = codedict[c]
+def modstr(mod):
+    """ Small helper function to provide a string of the mods set"""
+    s = ''
+    modifiers = mods(mod)
+    for key in modifiers:
+        if modifiers[key]:
+            s = s+ key + '-'
+    return s.rstrip('-')
+            
+def mods(mod):
+    """ Small helper function to provide a list of Modifier keys from a Mod """
+    modifiers = {'Shift':False,'Command':False,'Control':False,'Alternate':False,
+                 'Caps':False,'Unknown':False, 'LUnknown':False}
 
-# The following is fixed
-specials = {
-    u'return' : (0x24, 0),
-    u'delete' : (0x33, 0),
-    u'escape' : (0x35, 0),
-    u'command' : (0x37, 0),
-    u'shift' : (0x38, 0),
-    u'capslock' : (0x39, 0),
-    u'option' : (0x3A, 0),
-    u'alternate' : (0x3A, 0),
-    u'control' : (0x3B, 0),
-    u'rightshift' : (0x3C, 0),
-    u'rightoption' : (0x3D, 0),
-    u'rightcontrol' : (0x3E, 0),
-    u'function' : (0x3F, 0),
-    u'home': (0x73, 0),
-    u'pagedown': (0x79, 0),
-    u'forwarddelete': (0x75, 0),
-    u'pagedown' : (0x79, 0),
-    u'help' : (0x72, 0),
-    u'home' : (0x73, 0),
-    u'pageup' : (0x74, 0),
-    u'forwarddelete' : (0x75, 0),
-    u'F18' : (0x4F, 0),
-    u'F19' : (0x50, 0),
-    u'F20' : (0x5A, 0),
-    u'F5' : (0x60, 0),
-    u'F6' : (0x61, 0),
-    u'F7' : (0x62, 0),
-    u'F3' : (0x63, 0),
-    u'F8' : (0x64, 0),
-    u'F9' : (0x65, 0),
-    u'F11' : (0x67, 0),
-    u'F13' : (0x69, 0),
-    u'F16' : (0x6A, 0),
-    u'F14' : (0x6B, 0),
-    u'F10' : (0x6D, 0),
-    u'F12' : (0x6F, 0),
-    u'F15' : (0x71, 0),
-    u'function' : (0x3F, 0),
-    u'F17' : (0x40, 0)
-}
-codedict.update(specials)
+    if mod & 16:
+        modifiers['Control'] = True
+    if mod & 8:
+        # correct
+        modifiers['Alternate'] = True
+    if mod & 4:
+        # ?? maybe not right
+        modifiers['Caps'] = True
+    if mod & 2:
+        # correct
+        modifiers['Shift'] = True
+    if mod & 1:
+        # ?? maybe not right
+        modifiers['Command'] = True
+    return modifiers
 
 
-def keyCodeForChar(c):
-    return codedict[c]
+def isprintable(s):
+    # Unicode defines all but the following as printable. This is the
+    # same rule Python 3.x uses for str.isprintable, and also for which
+    # characters need to be hexlified when repr()ed. (Would it be simpler
+    # to just repr and strip off the quotes...?)
+    for c in s:
+        cat = unicodedata.category(c)
+        if cat[0] in 'C':
+            return False
+        elif cat == 'Zs' and c != ' ':
+            return False
+        elif cat in ('Zl, Zp'):
+            return False
+
+def printify(s):
+    return s if isprintable(s) else s.encode('unicode_escape').decode('utf-8')
+
+def CharForKeycode(keycode, modifier=0):
+    """ Provide a keycode and a modifier and it provides the Character"""
+    print printify(revmapping[keycode, modifier])
+    
+def KeyCodeForChar(character):
+    """ Finds the Keycode and Modifier for the character """
+    result = mapping.get(character, (None, 0))
+    if result is None or result[0] is None:
+        return None, 0
+        #print(u"{}: not found".format(printify(ch)))
+    else:
+        if not isinstance(result[0], tuple):
+            result = result,
+        for keycode, mod in result:
+            return keycode, mod 
     
 def printcode(keycode):
-    print(u"{}: {!r} Shift{!r} Option{!r} Command{!r}".format(
-        keycode,
-        createStringForKey(keycode, 0),
-        createStringForKey(keycode, 2),
-        createStringForKey(keycode, 8),
-        createStringForKey(keycode, 10)))
+    """ Prints all the variations of the Keycode with modifiers """
+    keys = ('{}:{}'.format(modstr(mod).rstrip('-'),
+                           printify(revmapping[keycode, mod]))
+            for mod in sorted(modmapping.values()))
+    print(u"{:3} {}".format(keycode, ' '.join(keys)))
 
 if __name__ == '__main__':
     import sys
@@ -161,10 +254,18 @@ if __name__ == '__main__':
         try:
             keycode = int(arg)
         except ValueError:
-            print(u"{!r} ('{}'): keycode {}, mod {}".format(
-                arg, arg, *keyCodeForChar(arg)))
+            for ch in arg:
+                result = mapping.get(ch, (None, 0))
+                if result is None or result[0] is None:
+                    print(u"{}: not found".format(printify(ch)))
+                else:
+                    if not isinstance(result[0], tuple):
+                        result = result,
+                    print(u"{}: {}".format(printify(ch),
+                                           ', '.join('{}{}'.format(modstr(mod), keycode)
+                                                     for keycode, mod in result)))
         else:
             printcode(keycode)
     if len(sys.argv) < 2:
-        for keycode in range(128):
+        for keycode in range(127):
             printcode(keycode)

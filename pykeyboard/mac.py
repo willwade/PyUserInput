@@ -106,6 +106,7 @@ class PyKeyboard(PyKeyboardMeta):
             # For sticky keys
             event = Quartz.CGEventCreateKeyboardEvent(None, key_code, down)
             mkeyStr = ''
+            # Caps, and the two unknown mod keys are not KCGEventMask keys. Not sure what do 
             for mkey in self.modifier_table:
                 if self.modifier_table[mkey]:
                     if len(mkeyStr)>1: mkeyStr = mkeyStr+' ^ '
@@ -141,31 +142,27 @@ class PyKeyboard(PyKeyboardMeta):
 
         Quartz.CGEventPost(0, ev.Quartz.CGEvent())
 
+
     def update_modifier_table(self,n):
-        """ Pass a modifier Bit and it will return which keys are set """
-        modar =  [n & (2**i) > 0 for i in range(4)]
-        if modar[0]:
-            self.modifier_table['Control'] = True
-        if modar[1]:
-            self.modifier_table['Shift'] = True
-        if modar[2]:
-            self.modifier_table['Alternate'] = True
-        if modar[3]:
-            self.modifier_table['Command'] = True
+        """ Pass a modifier Bit and it will return which keys are set 1: Cntrol 2: Shift 4: Caps-lock 8: Option """
+        modar = mac_keycode.mods(n)
+        for mod in modar:
+            if mod in self.modifier_table and modar[mod] is True:
+                self.modifier_table[mod] = True
         return True        
         
     def lookup_character_value(self, keycode, modifier=0):
         """ Helper method to lookup a character value from a keycode """
-        return mac_keycode.createStringForKey(keycode,m)
+        return mac_keycode.CharForKeyCode(keycode,m)
     
     def lookup_keycode_value(self, character):
         """ Helper method to lookup a keycode from a character """
-        key_code, modifier = mac_keycode.keyCodeForChar(character)
-        return key_code, modifier
+        key_code, modifier = mac_keycode.KeyCodeForChar(character)
+        return int(key_code), int(modifier)
     
     def is_char_shifted(self, character):
         """ Returns True if the key character is uppercase or shifted."""
-        key_code, modifier = mac_keycode.keyCodeForChar(character)
+        key_code, modifier = mac_keycode.KeyCodeForChar(character)
         return True if modifier == 2 else False
 
 class PyKeyboardEvent(PyKeyboardEventMeta):
