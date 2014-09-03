@@ -49,6 +49,24 @@ special_key_translate_table = {
     'KEYTYPE_ILLUMINATION_TOGGLE': 23
 }
 
+independent_from_layout_keys = {
+    'return' : 0x24,
+    'tab' : 0x30,
+    'space' : 0x31,
+    'delete' : 0x33,
+    'escape' : 0x35,
+    'command' : 0x37,
+    'shift' : 0x38,
+    'capslock' : 0x39,
+    'option' : 0x3A,
+    'alternate' : 0x3A,
+    'control' : 0x3B,
+    'rightshift' : 0x3C,
+    'rightoption' : 0x3D,
+    'rightcontrol' : 0x3E,
+    'function' : 0x3F,
+}
+
 class PyKeyboard(PyKeyboardMeta):
 
     def __init__(self):
@@ -89,34 +107,43 @@ class PyKeyboard(PyKeyboardMeta):
         # self.media_next_track_key = 'KEYTYPE_NEXT'
         # self.media_prev_track_key = 'KEYTYPE_PREVIOUS'
 
-    def _press_normal_key(self, key, down):
-        try:
-            # modifier is 0 ; or no-modifier by default
-            modifier = 0
-            # VK_ is a raw keycode. 
-            if key[0:3]=='VK_':
-                key_code = int(key[3:])
-            else:
-                # NB: this could then provide a different modifier
-                key_code, modifier = self.lookup_keycode_value(key)
+    def _handle_key(self, key):
+        if key.lower() in independent_from_layout_keys:
+            key_code = independent_from_layout_keys[key.lower()]
+            yield (key_code, 0)
+
+        # VK_ is a raw keycode. 
+        elif key[0:3]=='VK_':
+            key_code = int(key[3:])
+            yield (key_code, 0)
+
+        else:
+            # NB: this could then provide a different modifier
+            for key_code, modifier in self.lookup_keycode_value(key):
                 # Update this.. # hmm. how does this get set back again after a key press
                 self.update_modifier_table(modifier)
                 if key_code == None:
                     raise RuntimeError("Key {} not implemented.".format(key))
-            # For sticky keys
-            event = Quartz.CGEventCreateKeyboardEvent(None, key_code, down)
-            mkeyStr = ''
-            # Caps, and the two unknown mod keys are not KCGEventMask keys. Not sure what do 
-            for mkey in self.modifier_table:
-                if self.modifier_table[mkey]:
-                    if len(mkeyStr)>1: mkeyStr = mkeyStr+' ^ '
-                    mkeyStr = mkeyStr+'Quartz.kCGEventFlagMask'+mkey   
-            if len(mkeyStr)>1:
-                eval('Quartz.CGEventSetFlags(event, '+mkeyStr+')')
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-            # I don't get this line: 
-            if key.title() in self.modifier_table:
-              time.sleep(.1)
+                yield (key_code, modifier)
+
+
+    def _press_normal_key(self, key, down):
+        try:
+            for key_code, modifier in self._handle_key(key):
+                # For sticky keys
+                event = Quartz.CGEventCreateKeyboardEvent(None, key_code, down)
+                mkeyStr = ''
+                # Caps, and the two unknown mod keys are not KCGEventMask keys. Not sure what do 
+                for mkey in self.modifier_table:
+                    if self.modifier_table[mkey]:
+                        if len(mkeyStr)>1: mkeyStr = mkeyStr+' ^ '
+                        mkeyStr = mkeyStr+'Quartz.kCGEventFlagMask'+mkey   
+                if len(mkeyStr)>1:
+                    eval('Quartz.CGEventSetFlags(event, '+mkeyStr+')')
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+                # I don't get this line: 
+                if key.title() in self.modifier_table:
+                  time.sleep(.1)
 
         except KeyError:
             raise RuntimeError("Key {} not implemented.".format(key))
@@ -153,17 +180,15 @@ class PyKeyboard(PyKeyboardMeta):
         
     def lookup_character_value(self, keycode, modifier=0):
         """ Helper method to lookup a character value from a keycode """
-        return mac_keycode.CharForKeyCode(keycode,m)
+        return mac_keycode.CharForKeyCode(keycode, modifier)
     
     def lookup_keycode_value(self, character):
         """ Helper method to lookup a keycode from a character """
-        key_code, modifier = mac_keycode.KeyCodeForChar(character)
-        return int(key_code), int(modifier)
+        return [(int(key_code), int(modifier)) for key_code, modifier in mac_keycode.KeyCodeForChar(character)]
     
     def is_char_shifted(self, character):
         """ Returns True if the key character is uppercase or shifted."""
-        key_code, modifier = mac_keycode.KeyCodeForChar(character)
-        return True if modifier == 2 else False
+        return any(modifier == 2 for key_code, modifier in mac_keycode.KeyCodeForChar(character))
 
 class PyKeyboardEvent(PyKeyboardEventMeta):
     def run(self):
