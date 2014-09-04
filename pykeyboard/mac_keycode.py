@@ -229,13 +229,13 @@ def KeyCodeForChar(character):
     """ Finds the Keycode and Modifier for the character """
     result = mapping.get(character, (None, 0))
     if result is None or result[0] is None:
-        return None, 0
+        return [(None, 0)]
         #print(u"{}: not found".format(printify(ch)))
     else:
         if not isinstance(result[0], tuple):
             result = result,
-        for keycode, mod in result:
-            return keycode, mod 
+        return result
+
     
 def printcode(keycode):
     """ Prints all the variations of the Keycode with modifiers """
